@@ -13,31 +13,38 @@ td:nth-child(2),th:nth-child(2){width:60px;text-align:right} td:last-child{width
 <p style="color:#555">…o copia la imagen y pégala aquí con Ctrl+V.</p>
 <div id="st"></div><div id="out"></div>
 <p id="acc" hidden><button id="cp">Copiar para WhatsApp</button> <button class="s" id="wa">Abrir WhatsApp</button></p>
-<p><small><a href="#" id="k">Cambiar clave de Gemini</a> · la clave se guarda solo en este celular/navegador.</small></p>
+<p><small><a href="#" id="k">Cambiar PIN</a></small></p>
 <script>
-const MODELOS = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.5-flash'];
+const SERVIDOR = 'https://script.google.com/macros/s/AKfycbyzVAjvfAnN010GimJ5-ksmoqSoonp_wi5uJJzA9W5cSPX-fGHUgCvQ1YBNmGF2_xjw/exec';
 const PROMPT = 'De esta factura de compra devuelve SOLO JSON: {"productos":[{"descripcion":"nombre del producto","cantidad":1}]}. Sin proveedor, sin precios, sin costos. Si hay lineas que no son productos (envio, impuestos) omitelas.';
 const items = {}; const $ = id => document.getElementById(id);
 const b64 = f => new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result.split(',')[1]); fr.readAsDataURL(f); });
-const clave = () => { let k = localStorage.gk; if (!k) { k = (prompt('Pega tu clave de Gemini (se guarda solo en este dispositivo):') || '').trim(); if (k) localStorage.gk = k; } return k; };
-$('k').onclick = e => { e.preventDefault(); delete localStorage.gk; clave(); };
+// El PIN viaja en el link (.../lista/#72281): se guarda y se quita de la barra. Nada que escribir.
+if (location.hash.length > 1) { try { localStorage.pin = location.hash.slice(1); } catch {} history.replaceState(null, '', location.pathname); }
+const pin = () => { try { return localStorage.pin; } catch {} };
+$('k').onclick = e => { e.preventDefault(); const p = prompt('PIN:'); if (p) localStorage.pin = p.trim(); };
 
-async function extraer(file, key) {
-  const body = {contents:[{parts:[{text:PROMPT},{inline_data:{mime_type:file.type||'image/jpeg',data:await b64(file)}}]}], generationConfig:{responseMimeType:'application/json'}};
-  let err = '';
-  for (const m of MODELOS) {
-    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, {method:'POST', headers:{'Content-Type':'application/json','x-goog-api-key':key}, body:JSON.stringify(body)});
-    if (r.ok) return JSON.parse(((await r.json()).candidates[0].content.parts[0].text).replace(/```json|```/g,'')).productos || [];
-    err += ` [${m} ${r.status}]`; if (r.status === 400 || r.status === 403) { delete localStorage.gk; break; } // clave mala
-  }
-  throw new Error('Gemini fallo:' + err);
+// Reduce fotos grandes del celular (el servidor tiene limite de tamano); PDF pasa igual
+async function preparar(file) {
+  if (!file.type.startsWith('image/')) return {mime: file.type, data: await b64(file)};
+  const img = await createImageBitmap(file), s = Math.min(1, 1800 / Math.max(img.width, img.height));
+  const c = document.createElement('canvas'); c.width = img.width * s; c.height = img.height * s;
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  return {mime: 'image/jpeg', data: c.toDataURL('image/jpeg', 0.85).split(',')[1]};
+}
+
+async function extraer(file) {
+  const {mime, data} = await preparar(file);
+  const r = await fetch(SERVIDOR, {method:'POST', body:JSON.stringify({pin:pin(), prompt:PROMPT, mime, data})}); // text/plain: sin preflight CORS
+  const j = await r.json(); if (j.error) throw new Error(j.error);
+  return JSON.parse(j.text.replace(/```json|```/g,'')).productos || [];
 }
 
 async function leer(files) {
-  const key = clave(); if (!key) return;
+  if (!pin()) { const p = prompt('PIN:'); if (!p) return; localStorage.pin = p.trim(); }
   for (const f of files) {
     $('st').textContent = 'Leyendo ' + (f.name || 'imagen') + '…';
-    try { for (const p of await extraer(f, key)) items[p.descripcion] = (items[p.descripcion]||0) + (Number(p.cantidad)||0); $('st').textContent = ''; }
+    try { for (const p of await extraer(f)) items[p.descripcion] = (items[p.descripcion]||0) + (Number(p.cantidad)||0); $('st').textContent = ''; }
     catch (e) { $('st').textContent = '❌ ' + e.message; }
   }
   draw();
