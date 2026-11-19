@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex"><title>Lista de llegada</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:640px;margin:24px auto;padding:0 16px;color:#111}
+h1{font-size:22px} button,label.b{font:inherit;padding:12px 18px;border:0;border-radius:8px;background:#111;color:#fff;cursor:pointer;display:inline-block}
+button.s{background:#e5e5e5;color:#111} #st{margin:12px 0;color:#555} small{color:#777}
+table{width:100%;border-collapse:collapse;margin-top:12px} td,th{padding:8px;border-bottom:1px solid #ddd;text-align:left}
+td:nth-child(2),th:nth-child(2){width:60px;text-align:right} td:last-child{width:50px;text-align:right}
+</style></head><body>
+<h1>📦 Lista de llegada</h1>
+<label class="b">📷 Subir factura (foto o PDF)<input id="f" type="file" accept="image/*,application/pdf" multiple hidden></label>
+<p style="color:#555">…o copia la imagen y pégala aquí con Ctrl+V.</p>
+<div id="st"></div><div id="out"></div>
+<p id="acc" hidden><button id="cp">Copiar para WhatsApp</button> <button class="s" id="wa">Abrir WhatsApp</button></p>
+<p><small><a href="#" id="k">Cambiar clave de Gemini</a> · la clave se guarda solo en este celular/navegador.</small></p>
+<script>
+const MODELOS = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.5-flash'];
+const PROMPT = 'De esta factura de compra devuelve SOLO JSON: {"productos":[{"descripcion":"nombre del producto","cantidad":1}]}. Sin proveedor, sin precios, sin costos. Si hay lineas que no son productos (envio, impuestos) omitelas.';
+const items = {}; const $ = id => document.getElementById(id);
+const b64 = f => new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result.split(',')[1]); fr.readAsDataURL(f); });
+const clave = () => { let k = localStorage.gk; if (!k) { k = (prompt('Pega tu clave de Gemini (se guarda solo en este dispositivo):') || '').trim(); if (k) localStorage.gk = k; } return k; };
+$('k').onclick = e => { e.preventDefault(); delete localStorage.gk; clave(); };
+
+async function extraer(file, key) {
+  const body = {contents:[{parts:[{text:PROMPT},{inline_data:{mime_type:file.type||'image/jpeg',data:await b64(file)}}]}], generationConfig:{responseMimeType:'application/json'}};
+  let err = '';
+  for (const m of MODELOS) {
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, {method:'POST', headers:{'Content-Type':'application/json','x-goog-api-key':key}, body:JSON.stringify(body)});
+    if (r.ok) return JSON.parse(((await r.json()).candidates[0].content.parts[0].text).replace(/```json|```/g,'')).productos || [];
+    err += ` [${m} ${r.status}]`; if (r.status === 400 || r.status === 403) { delete localStorage.gk; break; } // clave mala
+  }
+  throw new Error('Gemini fallo:' + err);
+}
+
+async function leer(files) {
+  const key = clave(); if (!key) return;
+  for (const f of files) {
+    $('st').textContent = 'Leyendo ' + (f.name || 'imagen') + '…';
+    try { for (const p of await extraer(f, key)) items[p.descripcion] = (items[p.descripcion]||0) + (Number(p.cantidad)||0); $('st').textContent = ''; }
+    catch (e) { $('st').textContent = '❌ ' + e.message; }
+  }
+  draw();
+}
+document.onpaste = e => { const fs = [...e.clipboardData.files].filter(f => /^image\/|pdf$/.test(f.type)); if (fs.length) leer(fs); };
+$('f').onchange = e => leer([...e.target.files]).then(() => e.target.value = '');
+
+function draw() {
+  const rows = Object.entries(items); $('acc').hidden = !rows.length;
+  $('out').innerHTML = rows.length ? '<table><tr><th>Producto</th><th>Cant.</th><th></th></tr>' + rows.map(([n,q]) =>
+    `<tr><td contenteditable>${n.replace(/</g,'&lt;')}</td><td contenteditable>${q}</td><td><button class="s" onclick="this.closest('tr').remove()">✕</button></td></tr>`).join('') + '</table>' : '';
+}
+const texto = () => '📦 Llega:\n' + [...document.querySelectorAll('#out tr')].slice(1).map(tr => `• ${tr.cells[1].textContent.trim()} x ${tr.cells[0].textContent.trim()}`).join('\n');
+$('cp').onclick = () => { navigator.clipboard.writeText(texto()); $('cp').textContent = '¡Copiado!'; setTimeout(() => $('cp').textContent = 'Copiar para WhatsApp', 1500); };
+$('wa').onclick = () => open('https://wa.me/?text=' + encodeURIComponent(texto()));
+</script></body></html>
