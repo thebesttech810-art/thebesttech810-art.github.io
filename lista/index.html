@@ -12,7 +12,7 @@ td:nth-child(2),th:nth-child(2){width:60px;text-align:right} td:last-child{width
 <label class="b">📷 Subir factura (foto o PDF)<input id="f" type="file" accept="image/*,application/pdf" multiple hidden></label>
 <p style="color:#555">…o copia la imagen y pégala aquí con Ctrl+V.</p>
 <div id="st"></div><div id="out"></div>
-<p id="acc" hidden><button id="cp">Copiar para WhatsApp</button> <button class="s" id="wa">Abrir WhatsApp</button></p>
+<p id="acc" hidden><button id="cp">Copiar para WhatsApp</button> <button class="s" id="wa">Abrir WhatsApp</button> <button class="s" id="lm">🗑 Limpiar lista</button></p>
 <p><small><a href="#" id="k">Cambiar PIN</a></small></p>
 <script>
 const SERVIDOR = 'https://script.google.com/macros/s/AKfycbyzVAjvfAnN010GimJ5-ksmoqSoonp_wi5uJJzA9W5cSPX-fGHUgCvQ1YBNmGF2_xjw/exec';
@@ -42,6 +42,7 @@ async function extraer(file) {
 
 async function leer(files) {
   if (!pin()) { const p = prompt('PIN:'); if (!p) return; localStorage.pin = p.trim(); }
+  for (const k in items) delete items[k]; // cada subida reemplaza la lista anterior
   for (const f of files) {
     $('st').textContent = 'Leyendo ' + (f.name || 'imagen') + '…';
     try { for (const p of await extraer(f)) items[p.descripcion] = (items[p.descripcion]||0) + (Number(p.cantidad)||0); $('st').textContent = ''; }
@@ -59,5 +60,6 @@ function draw() {
 }
 const texto = () => '📦 Llega:\n' + [...document.querySelectorAll('#out tr')].slice(1).map(tr => `• ${tr.cells[1].textContent.trim()} x ${tr.cells[0].textContent.trim()}`).join('\n');
 $('cp').onclick = () => { navigator.clipboard.writeText(texto()); $('cp').textContent = '¡Copiado!'; setTimeout(() => $('cp').textContent = 'Copiar para WhatsApp', 1500); };
+$('lm').onclick = () => { for (const k in items) delete items[k]; draw(); };
 $('wa').onclick = () => open('https://wa.me/?text=' + encodeURIComponent(texto()));
 </script></body></html>
